@@ -75,6 +75,12 @@ void rs485_send_raw(const uint8_t *data, uint16_t len);
 void original_send(const uint8_t *payload, uint16_t len);
 
 /**
+ * Send raw bytes as-is on the RS485 port — no AA 55 header, no 0D 0A tail.
+ * Used for Modbus RTU frames produced by ma_output_build_frame().
+ */
+void rs485_send_plain(const uint8_t *data, uint16_t len);
+
+/**
  * Send a frame with the format [data...] 00 00 80 7F
  * (no extra command byte).
  */

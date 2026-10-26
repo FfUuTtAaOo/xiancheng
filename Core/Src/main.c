@@ -36,6 +36,7 @@
 #include "sensor_types.h"
 #include "flash_storage.h"
 #include "at24c04.h"
+#include "ma_output.h"
 
 /* USER CODE END Includes */
 
@@ -307,7 +308,14 @@ int main(void)
         g_sys.data_format = (fmt == 1 || fmt == 2) ? fmt : 2;
     }
 
+    /* Restore the 6-channel 4-20mA settings (zero/extreme) and the output
+       mode from the EEPROM.  A blank EEPROM (all 0xFF) falls back to the
+       factory defaults: zero 0, extreme 0.3 for ch1-3 and 0.03 for ch4-6. */
+    ma_output_init();
+
     HAL_TIM_Base_Start_IT(&htim2);   /* Start 1kHz timer */
+    g_sys.send_mode = 1;
+    g_sys.zero_calib_busy = 1;
 
   /* USER CODE END 2 */
 
@@ -342,9 +350,16 @@ int main(void)
         }
 
         if (g_sys.send_mode == 1) {
-            rs485_send_continuous();
+            if (g_sys.output_mode == MA_OUTPUT_MODE_MODBUS) {
+                /* 4-20mA 模式：20ms 一轮 Modbus RTU 写多寄存器指令，
+                   一帧同时下发 6 路通道的毫安值。 */
+                ma_output_poll();
+            } else {
+                rs485_send_continuous();
+            }
         } else {
             g_last_rs485_send_ms = g_tick_ms;   /* reset timer on stop */
+            ma_output_poll();                   /* keeps its own timer aligned */
         }
 
         /* PA12 heartbeat: toggles every 500 ms (1 Hz blink) while frames are
@@ -352,7 +367,8 @@ int main(void)
            format is one that transmits. Held low as soon as output stops. */
         {
             uint8_t streaming = (g_sys.send_mode == 1) &&
-                                (g_sys.debug_mode == 0 || g_sys.debug_mode == 1);
+                                ((g_sys.output_mode == MA_OUTPUT_MODE_MODBUS) ||
+                                 (g_sys.debug_mode == 0 || g_sys.debug_mode == 1));
 
             if (streaming) {
                 if ((uint32_t)(g_tick_ms - g_led_toggle_ms) >= LED_BLINK_HALF_PERIOD_MS) {

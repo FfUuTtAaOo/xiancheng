@@ -31,6 +31,17 @@ extern "C" {
 #define RS485_CMD_SET_FORMAT    0x34  /* Set data format: 0=mV,1=kg,2=N      */
 #define RS485_CMD_SET_FORMAT_N  0x35  /* Set data format: 0=mV,1=kg,2=N      */
 
+/* ---- 4-20mA 输出映射相关（见 ma_output.h） ---- */
+
+/* AA 55 50 [ch 1..6] [float32 大端] 0D 0A —— 设置某通道零值（12mA 锚点） */
+#define RS485_CMD_SET_MA_ZERO    0x50
+/* AA 55 51 [ch 1..6] [float32 大端] 0D 0A —— 设置某通道极值（另一端 = 零值-极值） */
+#define RS485_CMD_SET_MA_EXTREME 0x51
+/* AA 55 52 [0|1] 0D 0A —— 输出模式：0 = AA55 数据帧，1 = Modbus RTU 4-20mA */
+#define RS485_CMD_SET_OUT_MODE   0x52
+/* AA 55 53 0D 0A —— 查询 6 通道零值/极值，回 48 字节 (zero,extreme)×6 大端 */
+#define RS485_CMD_QUERY_MA_CFG   0x53
+
 #define ETHERCAT_DISABLED       0x40
 #define ETHERCAT_ENABLED        0x41
 #define RS485_CMD_SET_IP        0x0B  /* Set IP address   (4 bytes)          */

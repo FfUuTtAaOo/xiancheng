@@ -193,6 +193,13 @@ void original_send(const uint8_t *payload, uint16_t len)
     rs485_tx(payload, len);
 }
 
+/* 原样发送，不加 AA 55 头也不加 0D 0A 尾 —— Modbus RTU 帧走这里 */
+void rs485_send_plain(const uint8_t *data, uint16_t len)
+{
+    if (!data || !len) return;
+    rs485_tx(data, len);
+}
+
 void just_float_send_raw(const uint8_t *data, uint16_t len)
 {
     uint8_t tx[RS485_TX_BUF_SIZE];

@@ -4,6 +4,7 @@
 #include "calibration.h"
 #include "flash_storage.h"
 #include "filter.h"
+#include "ma_output.h"
 #include <string.h>
 #include "tim.h"
 #include "usart.h"
@@ -30,6 +31,26 @@ static float le_to_float(const uint8_t *src)
                | ((uint32_t)src[2] << 16)
                | ((uint32_t)src[1] << 8)
                | ((uint32_t)src[0]);
+    float f; memcpy(&f, &u, 4); return f;
+}
+
+/* 大端 float —— 4-20mA 相关命令（0x50/0x51/0x53）用大端，
+   与上位机习惯一致：1.0 → 3F 80 00 00，10.0 → 41 20 00 00 */
+static void float_to_be(uint8_t *dst, float f)
+{
+    uint32_t u; memcpy(&u, &f, 4);
+    dst[0] = (uint8_t)(u >> 24);
+    dst[1] = (uint8_t)(u >> 16);
+    dst[2] = (uint8_t)(u >> 8);
+    dst[3] = (uint8_t)(u);
+}
+
+static float be_to_float(const uint8_t *src)
+{
+    uint32_t u = ((uint32_t)src[0] << 24)
+               | ((uint32_t)src[1] << 16)
+               | ((uint32_t)src[2] << 8)
+               | ((uint32_t)src[3]);
     float f; memcpy(&f, &u, 4); return f;
 }
 
@@ -363,6 +384,58 @@ void rs485_cmd_dispatch(uint8_t cmd, const uint8_t *payload, uint16_t len)
         }
         flash_save_matrix(payload[0]);
         ack(cmd | payload[0]);
+        break;
+
+    /* ---- 0x50  Set the 4-20mA zero value of one channel ----
+       AA 55 50 [ch 1..6] [float32 BE] 0D 0A
+       零值恒对应 12mA。 */
+    case RS485_CMD_SET_MA_ZERO:
+        if (len < 5) { g_sys.comm_error_cnt++; break; }
+        if (payload[0] < 1 || payload[0] > MA_CHANNEL_NUM) {
+            g_sys.comm_error_cnt++;
+            break;
+        }
+        ma_output_set_zero(payload[0], be_to_float(payload + 1));
+        (void)ma_output_save();
+        ack(cmd);
+        break;
+
+    /* ---- 0x51  Set the 4-20mA extreme value of one channel ----
+       AA 55 51 [ch 1..6] [float32 BE] 0D 0A
+       另一端极值 = 零值 - 极值。 */
+    case RS485_CMD_SET_MA_EXTREME:
+        if (len < 5) { g_sys.comm_error_cnt++; break; }
+        if (payload[0] < 1 || payload[0] > MA_CHANNEL_NUM) {
+            g_sys.comm_error_cnt++;
+            break;
+        }
+        ma_output_set_extreme(payload[0], be_to_float(payload + 1));
+        (void)ma_output_save();
+        ack(cmd);
+        break;
+
+    /* ---- 0x52  Select the output mode ----
+       AA 55 52 [0|1] 0D 0A
+         0 → 原 AA 55 02 [6×float32] 0D 0A 连续数据流
+         1 → Modbus RTU 4-20mA 输出帧（20ms 一轮，写入后掉电保持） */
+    case RS485_CMD_SET_OUT_MODE:
+        if (len < 1) { g_sys.comm_error_cnt++; break; }
+        g_sys.output_mode = (payload[0] == 0) ? MA_OUTPUT_MODE_FRAME
+                                              : MA_OUTPUT_MODE_MODBUS;
+        (void)ma_output_save_mode(g_sys.output_mode);
+        ack(cmd);
+        break;
+
+    /* ---- 0x53  Query the 4-20mA settings of all 6 channels ----
+       回 48 字节：通道1..6 依次 零值(float32 BE) + 极值(float32 BE) */
+    case RS485_CMD_QUERY_MA_CFG:
+        for (int i = 0; i < (int)MA_CHANNEL_NUM; i++) {
+            float z = 0.0f, e = 0.0f;
+            ma_output_get_cfg((uint8_t)(i + 1), &z, &e);
+            float_to_be(buf + i * 8,     z);
+            float_to_be(buf + i * 8 + 4, e);
+        }
+        respond(cmd, buf, (uint16_t)(MA_CHANNEL_NUM * 8U));
         break;
 
     /* ---- 0x35  Debug mode toggle ---- */
